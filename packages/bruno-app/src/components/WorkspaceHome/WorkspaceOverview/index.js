@@ -112,6 +112,7 @@ const WorkspaceOverview = ({ workspace }) => {
           sourceUrl={importData.sourceUrl}
           filePath={importData.filePath}
           rawContent={importData.rawContent}
+          importIssues={importData.importIssues}
           onClose={() => setImportCollectionLocationModalOpen(false)}
           handleSubmit={handleImportCollectionLocation}
         />

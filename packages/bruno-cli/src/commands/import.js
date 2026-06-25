@@ -3,7 +3,7 @@ const path = require('path');
 const chalk = require('chalk');
 const jsyaml = require('js-yaml');
 const axios = require('axios');
-const { openApiToBruno, wsdlToBruno } = require('@usebruno/converters');
+const { openApiToBruno, wsdlToBruno, resolveExternalExamples } = require('@usebruno/converters');
 const { exists, isDirectory, sanitizeName } = require('../utils/filesystem');
 const { createCollectionFromBrunoObject } = require('../utils/collection');
 
@@ -79,6 +79,41 @@ const isUrl = (str) => {
   } catch (error) {
     return false;
   }
+};
+
+const makeOpenApiExampleReader = (source, opts = {}) => {
+  const sourceIsUrl = isUrl(source);
+  const baseDir = sourceIsUrl ? null : path.dirname(path.resolve(source));
+  const baseUrl = sourceIsUrl ? source : null;
+
+  const axiosOptions = () => {
+    const o = { timeout: 30000, maxContentLength: 10 * 1024 * 1024 };
+    if (opts.insecure) {
+      o.httpsAgent = new (require('https')).Agent({ rejectUnauthorized: false });
+    }
+    return o;
+  };
+
+  return async (uri) => {
+    if (isUrl(uri)) {
+      const res = await axios.get(uri, axiosOptions());
+      return {
+        content: typeof res.data === 'string' ? res.data : JSON.stringify(res.data),
+        mediaType: res.headers && res.headers['content-type']
+      };
+    }
+    if (baseUrl) {
+      const resolved = new URL(uri, baseUrl).toString();
+      const res = await axios.get(resolved, axiosOptions());
+      return {
+        content: typeof res.data === 'string' ? res.data : JSON.stringify(res.data),
+        mediaType: res.headers && res.headers['content-type']
+      };
+    }
+    const resolved = path.resolve(baseDir, uri);
+    const content = await fs.promises.readFile(resolved, 'utf8');
+    return { content };
+  };
 };
 
 const readOpenApiFile = async (source, options = {}) => {
@@ -237,6 +272,15 @@ const handler = async (argv) => {
         process.exit(1);
       }
 
+      const { issues: externalExampleIssues } = await resolveExternalExamples(openApiSpec, {
+        readFile: makeOpenApiExampleReader(source, { insecure })
+      });
+      if (externalExampleIssues && externalExampleIssues.length) {
+        externalExampleIssues.forEach((i) =>
+          console.log(chalk.yellow(`[${i.severity}] ${i.path} — ${i.message}`))
+        );
+      }
+
       console.log(chalk.yellow('Converting OpenAPI specification to Bruno format...'));
 
       // Convert OpenAPI to Bruno format
@@ -323,5 +367,6 @@ module.exports = {
   handler,
   isUrl,
   readOpenApiFile,
-  readWSDLFile
+  readWSDLFile,
+  makeOpenApiExampleReader
 };

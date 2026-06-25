@@ -2635,6 +2635,27 @@ const registerRendererEventHandlers = (mainWindow, watcher) => {
     }
   });
 
+  ipcMain.handle('renderer:resolve-openapi-external-examples', async (_event, { spec, specFilePath }) => {
+    console.log('[openapi-external] handler invoked, specFilePath=', specFilePath);
+    if (!spec || typeof spec !== 'object') {
+      console.log('[openapi-external] no spec; returning unchanged');
+      return { spec, issues: [] };
+    }
+    const baseDir = specFilePath ? path.dirname(specFilePath) : null;
+    console.log('[openapi-external] baseDir=', baseDir);
+    const readFile = async (uri) => {
+      if (!baseDir) {
+        throw new Error('No base directory available for externalValue resolution');
+      }
+      const resolved = path.resolve(baseDir, uri);
+      const content = await fs.promises.readFile(resolved, 'utf8');
+      return { content };
+    };
+    const result = await brunoConverters.resolveExternalExamples(spec, { readFile });
+    console.log('[openapi-external] done; issues=', result.issues.length);
+    return result;
+  });
+
   ipcMain.handle('renderer:migrate-collection-to-yml', async (event, collectionPathname, collectionUid) => {
     const format = getCollectionFormat(collectionPathname);
     if (format === 'yml') {

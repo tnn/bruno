@@ -169,7 +169,24 @@ const FileTab = ({
       if (type === 'openapi') {
         const filePath = window.ipcRenderer.getFilePath(file);
         const rawContent = await file.text();
-        await handleSubmit({ rawData: data, type, filePath, rawContent });
+        let resolvedData = data;
+        let importIssues = [];
+        console.log('[openapi-import] filePath=', filePath);
+        try {
+          const result = await window.ipcRenderer.invoke('renderer:resolve-openapi-external-examples', {
+            spec: data,
+            specFilePath: filePath
+          });
+          console.log('[openapi-import] resolve result issues=', result?.issues?.length, 'sample=', result?.issues?.slice?.(0, 2));
+          if (result && result.spec) {
+            resolvedData = result.spec;
+            importIssues = result.issues || [];
+          }
+        } catch (err) {
+          // Resolution failure is non-fatal — proceed with the raw spec.
+          console.warn('[openapi-import] Failed to resolve externalValue references', err);
+        }
+        await handleSubmit({ rawData: resolvedData, type, filePath, rawContent, importIssues });
       } else {
         await handleSubmit({ rawData: data, type });
       }

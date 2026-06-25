@@ -104,7 +104,7 @@ const groupingOptions = [
   { value: 'path', label: 'Paths', description: 'Group requests by URL path structure', testId: 'grouping-option-path' }
 ];
 
-const ImportCollectionLocation = ({ onClose, handleSubmit, rawData, format, sourceUrl, filePath, rawContent }) => {
+const ImportCollectionLocation = ({ onClose, handleSubmit, rawData, format, sourceUrl, filePath, rawContent, importIssues = [] }) => {
   const inputRef = useRef();
   const dispatch = useDispatch();
   const [groupingType, setGroupingType] = useState('tags');
@@ -143,7 +143,8 @@ const ImportCollectionLocation = ({ onClose, handleSubmit, rawData, format, sour
         .required('Location is required')
     }),
     onSubmit: async (values) => {
-      const { collection: convertedCollection, issues } = await convertCollection(format, rawData, groupingType, collectionFormat);
+      const { collection: convertedCollection, issues: conversionIssues } = await convertCollection(format, rawData, groupingType, collectionFormat);
+      const issues = [...(importIssues || []), ...(conversionIssues || [])];
       const options = { format: collectionFormat };
 
       if (showCheckForSpecUpdatesOption && enableCheckForSpecUpdates) {
