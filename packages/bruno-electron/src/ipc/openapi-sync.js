@@ -12,6 +12,7 @@ const {
   stringifyFolder
 } = require('@usebruno/filestore');
 const { openApiToBruno } = require('@usebruno/converters');
+const { resolveSpecExternalExamples } = require('../utils/openapi-external-examples');
 const { writeFile, sanitizeName, getCollectionFormat, posixifyPath } = require('../utils/filesystem');
 const { getEnvVars } = require('../utils/collection');
 const { getProcessEnvVars } = require('../store/process-env');
@@ -858,7 +859,7 @@ const compareRequestFields = (specRequest, actualRequest) => {
  * Load the stored spec for a collection and convert it to Bruno collection format.
  * Throws if no stored spec file exists.
  */
-const loadStoredSpecCollection = (collectionPath, brunoConfig) => {
+const loadStoredSpecCollection = async (collectionPath, brunoConfig) => {
   const sourceUrl = brunoConfig?.openapi?.[0]?.sourceUrl;
   const specEntry = sourceUrl ? getSpecEntryForUrl(collectionPath) : null;
   const specPath = specEntry ? path.join(getSpecsDir(), specEntry.filename) : null;
@@ -868,7 +869,7 @@ const loadStoredSpecCollection = (collectionPath, brunoConfig) => {
   }
 
   const specRaw = fs.readFileSync(specPath, 'utf8');
-  const storedSpec = parseSpec(specRaw);
+  const storedSpec = await resolveSpecExternalExamples(parseSpec(specRaw), { sourceUrl, collectionPath });
   const groupBy = brunoConfig?.openapi?.[0]?.groupBy || 'tags';
   return openApiToBruno(storedSpec, { groupBy });
 };
@@ -1031,7 +1032,14 @@ const registerOpenAPISyncIpc = (mainWindow) => {
         // Default to 'tags' if brunoConfig is not available
       }
 
-      const diff = compareSpecs(storedSpec, newSpec, groupBy);
+      // Compare resolved clones so externalValue examples don't register as
+      // endpoint diffs; returned specs/hashes stay raw for hash consistency.
+      const resolveOpts = { sourceUrl, collectionPath };
+      const diff = compareSpecs(
+        await resolveSpecExternalExamples(storedSpec, resolveOpts),
+        await resolveSpecExternalExamples(newSpec, resolveOpts),
+        groupBy
+      );
 
       // Detect remote spec format and determine correct filename
       const remoteIsYaml = isYamlContent(newSpecContent);
@@ -1116,6 +1124,10 @@ const registerOpenAPISyncIpc = (mainWindow) => {
       }
 
       // Convert spec to Bruno collection format
+      specToCompare = await resolveSpecExternalExamples(specToCompare, {
+        sourceUrl: brunoConfig?.openapi?.[0]?.sourceUrl,
+        collectionPath
+      });
       const specAsCollection = openApiToBruno(specToCompare, { groupBy });
 
       // Build map of expected items by endpoint ID (method:path)
@@ -1278,6 +1290,10 @@ const registerOpenAPISyncIpc = (mainWindow) => {
 
       // Convert spec to Bruno collection format
       const groupBy = brunoConfig?.openapi?.[0]?.groupBy || 'tags';
+      specToUse = await resolveSpecExternalExamples(specToUse, {
+        sourceUrl: brunoConfig?.openapi?.[0]?.sourceUrl,
+        collectionPath
+      });
       const specAsCollection = openApiToBruno(specToUse, { groupBy });
 
       // Find the spec item for this endpoint
@@ -1383,7 +1399,8 @@ const registerOpenAPISyncIpc = (mainWindow) => {
       // Mode: reset - Save spec and reset all endpoints to spec (preserve tests/scripts)
       if (mode === 'reset' && diff.newSpec) {
         const groupBy = brunoConfig?.openapi?.[0]?.groupBy || 'tags';
-        const newCollection = openApiToBruno(diff.newSpec, { groupBy });
+        const resolvedNewSpec = await resolveSpecExternalExamples(diff.newSpec, { sourceUrl, collectionPath });
+        const newCollection = openApiToBruno(resolvedNewSpec, { groupBy });
 
         // Build map of spec items by endpoint ID
         const specItemsMap = buildSpecItemsMap(newCollection.items || []);
@@ -1465,7 +1482,8 @@ const registerOpenAPISyncIpc = (mainWindow) => {
       let newCollection;
       if (diff.newSpec) {
         try {
-          newCollection = openApiToBruno(diff.newSpec, { groupBy });
+          const resolvedNewSpec = await resolveSpecExternalExamples(diff.newSpec, { sourceUrl, collectionPath });
+          newCollection = openApiToBruno(resolvedNewSpec, { groupBy });
         } catch (err) {
           console.error('[OpenAPI Sync] Error converting spec:', err);
         }
@@ -1612,7 +1630,11 @@ const registerOpenAPISyncIpc = (mainWindow) => {
           const storedSpecPath = applySpecEntry ? path.join(getSpecsDir(), applySpecEntry.filename) : null;
           if (storedSpecPath && fs.existsSync(storedSpecPath)) {
             try {
-              driftCollection = openApiToBruno(parseSpec(fs.readFileSync(storedSpecPath, 'utf8')), { groupBy });
+              const storedSpec = await resolveSpecExternalExamples(
+                parseSpec(fs.readFileSync(storedSpecPath, 'utf8')),
+                { sourceUrl, collectionPath }
+              );
+              driftCollection = openApiToBruno(storedSpec, { groupBy });
             } catch (err) {
               console.error('[OpenAPI Sync] Error converting stored spec for drift reset:', err);
             }
@@ -1799,7 +1821,7 @@ const registerOpenAPISyncIpc = (mainWindow) => {
     try {
       const { format, brunoConfig } = loadBrunoConfig(collectionPath);
       const groupBy = brunoConfig?.openapi?.[0]?.groupBy || 'tags';
-      const specCollection = loadStoredSpecCollection(collectionPath, brunoConfig);
+      const specCollection = await loadStoredSpecCollection(collectionPath, brunoConfig);
 
       let addedCount = 0;
       for (const endpoint of endpoints) {
@@ -1832,7 +1854,7 @@ const registerOpenAPISyncIpc = (mainWindow) => {
   ipcMain.handle('renderer:reset-endpoints-to-spec', async (event, { collectionPath, endpoints }) => {
     try {
       const { brunoConfig } = loadBrunoConfig(collectionPath);
-      const specCollection = loadStoredSpecCollection(collectionPath, brunoConfig);
+      const specCollection = await loadStoredSpecCollection(collectionPath, brunoConfig);
 
       let resetCount = 0;
       for (const endpoint of endpoints) {

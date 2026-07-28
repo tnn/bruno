@@ -12,6 +12,16 @@ import {
   groupRequestsByPath
 } from './openapi-common';
 
+// An Example Object with an unresolved externalValue has no usable value —
+// falling back to the object itself would leak `externalValue` into bodies.
+const getExampleObjectValue = (example) => {
+  if (example && typeof example === 'object' && !Array.isArray(example)) {
+    if (example.value !== undefined) return example.value;
+    if (example.externalValue !== undefined) return '';
+  }
+  return example;
+};
+
 const getContentLevelExample = (bodyContent) => {
   if (bodyContent.example !== undefined) return bodyContent.example;
   const firstExample = Object.values(bodyContent.examples ?? {})[0];
@@ -564,7 +574,7 @@ const transformOpenapiRequestItem = (request, usedNames = new Set(), options = {
         if (content.examples) {
           // Multiple request body examples
           Object.entries(content.examples).forEach(([exampleKey, example]) => {
-            const exampleValue = example.value !== undefined ? example.value : example;
+            const exampleValue = getExampleObjectValue(example);
             requestBodyExamples.push({
               key: exampleKey,
               schema: { example: exampleValue }, // Wrap in schema format for BODY_TYPE_HANDLERS
@@ -605,7 +615,7 @@ const transformOpenapiRequestItem = (request, usedNames = new Set(), options = {
               Object.entries(content.examples).forEach(([exampleKey, example]) => {
                 const exampleName = example.summary || exampleKey || `${statusCode} Response`;
                 const exampleDescription = example.description || '';
-                const exampleValue = example.value !== undefined ? example.value : example;
+                const exampleValue = getExampleObjectValue(example);
 
                 createExamplesWithRequestBody({
                   responseExampleValue: exampleValue,

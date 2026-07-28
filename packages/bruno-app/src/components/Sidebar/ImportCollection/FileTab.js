@@ -171,13 +171,11 @@ const FileTab = ({
         const rawContent = await file.text();
         let resolvedData = data;
         let importIssues = [];
-        console.log('[openapi-import] filePath=', filePath);
         try {
           const result = await window.ipcRenderer.invoke('renderer:resolve-openapi-external-examples', {
             spec: data,
             specFilePath: filePath
           });
-          console.log('[openapi-import] resolve result issues=', result?.issues?.length, 'sample=', result?.issues?.slice?.(0, 2));
           if (result && result.spec) {
             resolvedData = result.spec;
             importIssues = result.issues || [];

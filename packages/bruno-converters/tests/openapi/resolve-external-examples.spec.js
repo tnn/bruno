@@ -265,4 +265,160 @@ describe('resolveExternalExamples', () => {
     });
     expect(out).toBe(spec);
   });
+
+  describe('component sections reachable via $ref', () => {
+    const shell = (components) => ({
+      openapi: '3.0.0',
+      info: { title: 't', version: '1' },
+      paths: {},
+      components
+    });
+
+    it('resolves examples inside components.responses', async () => {
+      const spec = shell({
+        responses: {
+          Me: {
+            description: 'ok',
+            content: {
+              'application/json': { examples: { me: { externalValue: './me.json' } } }
+            }
+          }
+        }
+      });
+      const { spec: out, issues } = await resolveExternalExamples(spec, {
+        readFile: makeReader({ './me.json': { content: '{"id":1}', mediaType: 'application/json' } })
+      });
+      const ex = out.components.responses.Me.content['application/json'].examples.me;
+      expect(ex.value).toEqual({ id: 1 });
+      expect(ex.externalValue).toBeUndefined();
+      expect(issues).toEqual([]);
+    });
+
+    it('resolves examples inside components.requestBodies', async () => {
+      const spec = shell({
+        requestBodies: {
+          NewUser: {
+            content: {
+              'application/json': { examples: { good: { externalValue: './new-user.json' } } }
+            }
+          }
+        }
+      });
+      const { spec: out, issues } = await resolveExternalExamples(spec, {
+        readFile: makeReader({ './new-user.json': { content: '{"n":1}', mediaType: 'application/json' } })
+      });
+      expect(out.components.requestBodies.NewUser.content['application/json'].examples.good.value).toEqual({ n: 1 });
+      expect(issues).toEqual([]);
+    });
+
+    it('resolves examples inside components.parameters', async () => {
+      const spec = shell({
+        parameters: {
+          UserId: {
+            name: 'userId',
+            in: 'query',
+            examples: { sample: { externalValue: './id.json' } }
+          }
+        }
+      });
+      const { spec: out, issues } = await resolveExternalExamples(spec, {
+        readFile: makeReader({ './id.json': { content: '42', mediaType: 'application/json' } })
+      });
+      expect(out.components.parameters.UserId.examples.sample.value).toBe(42);
+      expect(issues).toEqual([]);
+    });
+
+    it('resolves examples inside components.headers', async () => {
+      const spec = shell({
+        headers: {
+          RateLimit: { examples: { low: { externalValue: './limit.json' } } }
+        }
+      });
+      const { spec: out, issues } = await resolveExternalExamples(spec, {
+        readFile: makeReader({ './limit.json': { content: '10', mediaType: 'application/json' } })
+      });
+      expect(out.components.headers.RateLimit.examples.low.value).toBe(10);
+      expect(issues).toEqual([]);
+    });
+
+    it('resolves examples inside components.pathItems operations', async () => {
+      const spec = shell({
+        pathItems: {
+          MePath: {
+            get: {
+              responses: {
+                200: {
+                  content: {
+                    'application/json': { examples: { me: { externalValue: './me.json' } } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      });
+      const { spec: out, issues } = await resolveExternalExamples(spec, {
+        readFile: makeReader({ './me.json': { content: '{"id":2}', mediaType: 'application/json' } })
+      });
+      const ex = out.components.pathItems.MePath.get.responses['200'].content['application/json'].examples.me;
+      expect(ex.value).toEqual({ id: 2 });
+      expect(issues).toEqual([]);
+    });
+  });
+
+  describe('inline sites previously missed', () => {
+    it('resolves examples on inline response headers', async () => {
+      const spec = {
+        openapi: '3.0.0',
+        info: { title: 't', version: '1' },
+        paths: {
+          '/u': {
+            get: {
+              responses: {
+                200: {
+                  description: 'ok',
+                  headers: {
+                    'X-Rate-Limit': { examples: { low: { externalValue: './limit.json' } } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      };
+      const { spec: out, issues } = await resolveExternalExamples(spec, {
+        readFile: makeReader({ './limit.json': { content: '10', mediaType: 'application/json' } })
+      });
+      expect(out.paths['/u'].get.responses['200'].headers['X-Rate-Limit'].examples.low.value).toBe(10);
+      expect(issues).toEqual([]);
+    });
+
+    it('resolves examples on a parameter content media type', async () => {
+      const spec = {
+        openapi: '3.0.0',
+        info: { title: 't', version: '1' },
+        paths: {
+          '/u': {
+            get: {
+              parameters: [
+                {
+                  name: 'filter',
+                  in: 'query',
+                  content: {
+                    'application/json': { examples: { sample: { externalValue: './filter.json' } } }
+                  }
+                }
+              ],
+              responses: { 200: { description: 'ok' } }
+            }
+          }
+        }
+      };
+      const { spec: out, issues } = await resolveExternalExamples(spec, {
+        readFile: makeReader({ './filter.json': { content: '{"a":1}', mediaType: 'application/json' } })
+      });
+      expect(out.paths['/u'].get.parameters[0].content['application/json'].examples.sample.value).toEqual({ a: 1 });
+      expect(issues).toEqual([]);
+    });
+  });
 });

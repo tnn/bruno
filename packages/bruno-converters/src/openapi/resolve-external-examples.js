@@ -40,35 +40,70 @@ const collectExampleSites = (spec) => {
     }
   };
 
-  const visitParameters = (parameters, basePath) => {
-    if (!Array.isArray(parameters)) return;
-    parameters.forEach((p, i) => {
-      if (p && p.examples) pushExamples(p.examples, `${basePath}[${i}].examples`);
-    });
+  // Parameter and Header objects share the shape that carries examples
+  const visitParameterLike = (p, basePath) => {
+    if (!p || typeof p !== 'object') return;
+    if (p.examples) pushExamples(p.examples, `${basePath}.examples`);
+    if (p.content) visitContent(p.content, `${basePath}.content`);
   };
 
-  const paths = spec?.paths || {};
-  for (const p of Object.keys(paths)) {
-    const pathItem = paths[p] || {};
-    visitParameters(pathItem.parameters, `paths.${p}.parameters`);
+  const visitHeaders = (headers, basePath) => {
+    if (!headers || typeof headers !== 'object') return;
+    for (const name of Object.keys(headers)) {
+      visitParameterLike(headers[name], `${basePath}.${name}`);
+    }
+  };
+
+  const visitParameters = (parameters, basePath) => {
+    if (!Array.isArray(parameters)) return;
+    parameters.forEach((p, i) => visitParameterLike(p, `${basePath}[${i}]`));
+  };
+
+  const visitResponse = (response, basePath) => {
+    if (!response || typeof response !== 'object') return;
+    if (response.content) visitContent(response.content, `${basePath}.content`);
+    if (response.headers) visitHeaders(response.headers, `${basePath}.headers`);
+  };
+
+  const visitRequestBody = (requestBody, basePath) => {
+    if (requestBody?.content) visitContent(requestBody.content, `${basePath}.content`);
+  };
+
+  const visitPathItem = (pathItem, basePath) => {
+    if (!pathItem || typeof pathItem !== 'object') return;
+    visitParameters(pathItem.parameters, `${basePath}.parameters`);
     for (const method of Object.keys(pathItem)) {
       if (method === 'parameters') continue;
       const op = pathItem[method];
       if (!op || typeof op !== 'object') continue;
-      visitParameters(op.parameters, `paths.${p}.${method}.parameters`);
-      if (op.requestBody?.content) {
-        visitContent(op.requestBody.content, `paths.${p}.${method}.requestBody.content`);
-      }
+      visitParameters(op.parameters, `${basePath}.${method}.parameters`);
+      visitRequestBody(op.requestBody, `${basePath}.${method}.requestBody`);
       const responses = op.responses || {};
       for (const status of Object.keys(responses)) {
-        const r = responses[status];
-        if (r?.content) visitContent(r.content, `paths.${p}.${method}.responses.${status}.content`);
+        visitResponse(responses[status], `${basePath}.${method}.responses.${status}`);
       }
     }
+  };
+
+  const paths = spec?.paths || {};
+  for (const p of Object.keys(paths)) {
+    visitPathItem(paths[p], `paths.${p}`);
   }
 
-  const componentExamples = spec?.components?.examples;
-  if (componentExamples) pushExamples(componentExamples, 'components.examples');
+  const components = spec?.components || {};
+  if (components.examples) pushExamples(components.examples, 'components.examples');
+  const eachEntry = (section, visit) => {
+    const entries = components[section];
+    if (!entries || typeof entries !== 'object') return;
+    for (const name of Object.keys(entries)) {
+      visit(entries[name], `components.${section}.${name}`);
+    }
+  };
+  eachEntry('responses', visitResponse);
+  eachEntry('requestBodies', visitRequestBody);
+  eachEntry('parameters', visitParameterLike);
+  eachEntry('headers', visitParameterLike);
+  eachEntry('pathItems', visitPathItem);
 
   return sites;
 };
